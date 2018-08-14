@@ -2,15 +2,22 @@ package stub
 
 import (
 	"context"
+	stderr "errors"
 
 	"qiniu-ava/checkpoint-operator/pkg/apis/ava/v1alpha1"
 
 	"github.com/operator-framework/operator-sdk/pkg/sdk"
+	gerr "github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	batchv1 "k8s.io/api/batch/v1"
+	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	kubeletapis "k8s.io/kubernetes/pkg/kubelet/apis"
+)
+
+var (
+	truevalue       = true
+	one       int32 = 1
 )
 
 func NewHandler() sdk.Handler {
@@ -18,51 +25,86 @@ func NewHandler() sdk.Handler {
 }
 
 type Handler struct {
-	// Fill me
+	cfg *Config
+}
+
+type Config struct {
+	ImagePullSecret string `json:"imagePullSecret"`
 }
 
 func (h *Handler) Handle(ctx context.Context, event sdk.Event) error {
 	switch o := event.Object.(type) {
 	case *v1alpha1.Checkpoint:
-		err := sdk.Create(newbusyBoxPod(o))
-		if err != nil && !errors.IsAlreadyExists(err) {
-			logrus.Errorf("Failed to create busybox pod : %v", err)
+		cp := event.Object.(*v1alpha1.Checkpoint)
+		logrus.Infof("handling checkpoint %s/%s", cp.Namespace, cp.Name)
+		if err := h.createCheckpointJob(cp); err != nil {
+			logrus.Errorf("Failed to new checkpoint job: %v", err)
 			return err
 		}
+	default:
+		logrus.Warningf("got unexpected object: %v", o)
 	}
 	return nil
 }
 
-// newbusyBoxPod demonstrates how to create a busybox pod
-func newbusyBoxPod(cr *v1alpha1.Checkpoint) *corev1.Pod {
-	labels := map[string]string{
-		"app": "busy-box",
+func (h *Handler) createCheckpointJob(cp *v1alpha1.Checkpoint) error {
+	pod := &v1.Pod{
+		TypeMeta:   metav1.TypeMeta{Kind: "Pod", APIVersion: v1.SchemeGroupVersion.String()},
+		ObjectMeta: metav1.ObjectMeta{Name: cp.Spec.PodName, Namespace: cp.Namespace},
 	}
-	return &corev1.Pod{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "Pod",
-			APIVersion: "v1",
-		},
+	if err := sdk.Get(pod); err != nil {
+		return gerr.Wrap(err, "get pod info failed")
+	}
+	if !podIsReady(pod) {
+		return stderr.New("pod is not ready for checkpoint")
+	}
+	cp.Spec.NodeName = pod.Spec.NodeName
+
+	job := &batchv1.Job{
+		TypeMeta: metav1.TypeMeta{Kind: "Job", APIVersion: batchv1.SchemeGroupVersion.String()},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "busy-box",
-			Namespace: cr.Namespace,
-			OwnerReferences: []metav1.OwnerReference{
-				*metav1.NewControllerRef(cr, schema.GroupVersionKind{
-					Group:   v1alpha1.SchemeGroupVersion.Group,
-					Version: v1alpha1.SchemeGroupVersion.Version,
-					Kind:    "Checkpoint",
-				}),
+			// Name: schema.
+			Namespace: pod.Namespace,
+			Labels: map[string]string{
+				"pod":       cp.Spec.PodName,
+				"container": cp.Spec.ContainerName,
+				"node":      cp.Spec.NodeName,
 			},
-			Labels: labels,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion:         v1alpha1.SchemeGroupVersion.String(),
+				Kind:               "Checkpoint",
+				Name:               cp.Name,
+				UID:                cp.UID,
+				Controller:         &truevalue,
+				BlockOwnerDeletion: &truevalue,
+			}},
 		},
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{
-				{
-					Name:    "busybox",
-					Image:   "busybox",
-					Command: []string{"sleep", "3600"},
+		Spec: batchv1.JobSpec{
+			Parallelism: &one,
+			Completions: &one,
+			Template: v1.PodTemplateSpec{
+				Spec: v1.PodSpec{
+					// todo: mount /var/docker.sock
+					Volumes: []v1.Volume{},
+					// todo: commit and push
+					Containers: []v1.Container{{
+						Name:  "runner",
+						Image: "", // todo...
+					}},
+					NodeSelector:     map[string]string{string(kubeletapis.LabelHostname): cp.Spec.NodeName},
+					NodeName:         cp.Spec.NodeName,
+					ImagePullSecrets: []v1.LocalObjectReference{{Name: h.cfg.ImagePullSecret}},
 				},
 			},
 		},
 	}
+
+	if err := sdk.Create(job); err != nil {
+		return gerr.Wrap(err, "create checkpoint job failed")
+	}
+
+	logrus.Infof("checkpoint job created for %s/%s ", cp.Namespace, cp.Name)
+	return nil
 }
+
+func podIsReady(pod *v1.Pod) bool { return false }
