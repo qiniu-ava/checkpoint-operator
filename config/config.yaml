@@ -1,0 +1,3 @@
+apiVersion: ava.qiniu.com/v1alpha1
+kind: Checkpoint
+projectName: checkpoint-operator
