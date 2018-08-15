@@ -27,10 +27,6 @@ type CheckpointSpec struct {
 	PodName       string `json:"podName"`
 	ContainerName string `json:"containerName"`
 
-	// NodeName is the name of the node the pod/container running on, the checkpoint job must run on this node
-	// +optional
-	NodeName string `json:"nodeName,omitempty"`
-
 	// ImageName is the checkpoint image name in the form of 'my-checkpoint:v0.0.1'
 	// The full name for the pushed image will be my-docker-registry-server/my-checkpoint:v0.0.1
 	// 'my-docker-registry-server' will be retrieved from ImagePushSecret
@@ -44,5 +40,8 @@ type CheckpointSpec struct {
 
 type CheckpointStatus struct {
 	// Job is a reference to the internal checkpoint job which does the real commit/push works
-	Job v1.ObjectReference `json:"job"`
+	JobRef v1.ObjectReference `json:"jobRef"`
+
+	// NodeName is the name of the node the pod/container running on, the checkpoint job must run on this node
+	NodeName string `json:"nodeName"`
 }

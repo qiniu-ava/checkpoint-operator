@@ -11,6 +11,7 @@ import (
 const (
 	version   = "v1alpha1"
 	groupName = "ava.qiniu.com"
+	kind      = "Checkpoint"
 )
 
 var (
@@ -18,6 +19,7 @@ var (
 	AddToScheme   = SchemeBuilder.AddToScheme
 	// SchemeGroupVersion is the group version used to register these objects.
 	SchemeGroupVersion = schema.GroupVersion{Group: groupName, Version: version}
+	SchemeGVK          = schema.GroupVersionKind{Group: groupName, Version: version, Kind: kind}
 )
 
 func init() {

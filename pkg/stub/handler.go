@@ -33,16 +33,25 @@ type Config struct {
 }
 
 func (h *Handler) Handle(ctx context.Context, event sdk.Event) error {
-	switch o := event.Object.(type) {
+	switch event.Object.(type) {
 	case *v1alpha1.Checkpoint:
 		cp := event.Object.(*v1alpha1.Checkpoint)
-		logrus.Infof("handling checkpoint %s/%s", cp.Namespace, cp.Name)
-		if err := h.createCheckpointJob(cp); err != nil {
-			logrus.Errorf("Failed to new checkpoint job: %v", err)
-			return err
+		if event.Deleted {
+			logrus.Infof("deleting checkpoint %s/%s", cp.Namespace, cp.Name)
+			if err := h.deleteCheckpointJob(cp); err != nil {
+				logrus.Errorf("failed to delete checkpoint job: %v", err)
+				return err
+			}
+		} else {
+			logrus.Infof("creating checkpoint %s/%s", cp.Namespace, cp.Name)
+			if err := h.createCheckpointJob(cp); err != nil {
+				logrus.Errorf("failed to create checkpoint job: %v", err)
+				return err
+			}
 		}
+
 	default:
-		logrus.Warningf("got unexpected object: %v", o)
+		logrus.Warningf("got unexpected event: %v", event)
 	}
 	return nil
 }
@@ -58,26 +67,22 @@ func (h *Handler) createCheckpointJob(cp *v1alpha1.Checkpoint) error {
 	if !podIsReady(pod) {
 		return stderr.New("pod is not ready for checkpoint")
 	}
-	cp.Spec.NodeName = pod.Spec.NodeName
+	cp.Status.NodeName = pod.Spec.NodeName
 
 	job := &batchv1.Job{
-		TypeMeta: metav1.TypeMeta{Kind: "Job", APIVersion: batchv1.SchemeGroupVersion.String()},
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Job",
+			APIVersion: batchv1.SchemeGroupVersion.String(),
+		},
 		ObjectMeta: metav1.ObjectMeta{
-			// Name: schema.
-			Namespace: pod.Namespace,
-			Labels: map[string]string{
-				"pod":       cp.Spec.PodName,
-				"container": cp.Spec.ContainerName,
-				"node":      cp.Spec.NodeName,
+			GenerateName:    cp.Name,
+			Namespace:       pod.Namespace,
+			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(cp, v1alpha1.SchemeGVK)},
+			Annotations: map[string]string{
+				v1alpha1.SchemeGroupVersion.String() + "/pod-name":       cp.Spec.PodName,
+				v1alpha1.SchemeGroupVersion.String() + "/container-name": cp.Spec.ContainerName,
+				v1alpha1.SchemeGroupVersion.String() + "/node-name":      cp.Status.NodeName,
 			},
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion:         v1alpha1.SchemeGroupVersion.String(),
-				Kind:               "Checkpoint",
-				Name:               cp.Name,
-				UID:                cp.UID,
-				Controller:         &truevalue,
-				BlockOwnerDeletion: &truevalue,
-			}},
 		},
 		Spec: batchv1.JobSpec{
 			Parallelism: &one,
@@ -86,13 +91,12 @@ func (h *Handler) createCheckpointJob(cp *v1alpha1.Checkpoint) error {
 				Spec: v1.PodSpec{
 					// todo: mount /var/docker.sock
 					Volumes: []v1.Volume{},
-					// todo: commit and push
 					Containers: []v1.Container{{
 						Name:  "runner",
 						Image: "", // todo...
 					}},
-					NodeSelector:     map[string]string{string(kubeletapis.LabelHostname): cp.Spec.NodeName},
-					NodeName:         cp.Spec.NodeName,
+					NodeSelector:     map[string]string{string(kubeletapis.LabelHostname): cp.Status.NodeName},
+					NodeName:         cp.Status.NodeName,
 					ImagePullSecrets: []v1.LocalObjectReference{{Name: h.cfg.ImagePullSecret}},
 				},
 			},
@@ -108,3 +112,5 @@ func (h *Handler) createCheckpointJob(cp *v1alpha1.Checkpoint) error {
 }
 
 func podIsReady(pod *v1.Pod) bool { return false }
+
+func (h *Handler) deleteCheckpointJob(cp *v1alpha1.Checkpoint) error { return nil }
