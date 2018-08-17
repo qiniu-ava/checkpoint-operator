@@ -14,7 +14,6 @@ import (
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	kubeletapis "k8s.io/kubernetes/pkg/kubelet/apis"
 )
 
 const listLimit = 16
@@ -33,7 +32,8 @@ type Handler struct {
 }
 
 type Config struct {
-	ImagePullSecret string `json:"imagePullSecret"`
+	ImagePullSecret       string `json:"imagePullSecret"`
+	CheckpointWorkerImage string `json:"checkpointWorkerImage"`
 }
 
 func (h *Handler) Handle(ctx context.Context, event sdk.Event) error {
@@ -41,24 +41,41 @@ func (h *Handler) Handle(ctx context.Context, event sdk.Event) error {
 	case *v1alpha1.Checkpoint:
 		cp := event.Object.(*v1alpha1.Checkpoint)
 		if event.Deleted {
-			logrus.Infof("checkpoint %s/%s deleted", cp.Namespace, cp.Name)
+			logger(cp).Info("checkpoint deleted")
 		} else {
-			logrus.Infof("creating checkpoint %s/%s", cp.Namespace, cp.Name)
+			logger(cp).Info("creating checkpoint")
 			if err := h.createCheckpointJob(cp); err != nil {
-				logrus.Errorf("failed to create checkpoint job: %v", err)
+				logger(cp).WithField("error", err).Error("failed to create checkpoint job")
 				return err
 			}
+			logger(cp).Info("checkpoint created")
+		}
+	case *batchv1.Job:
+		job := event.Object.(*batchv1.Job)
+		if event.Deleted {
+			logger(job).Info("checkpoint job deleted")
+		} else {
+			logger(job).Info("updating checkpoint job")
+			if err := updateCheckpointByJob(job); err != nil {
+				logger(job).WithField("error", err).Error("failed to update checkpoint on job updated")
+				return err
+			}
+			logger(job).Info("checkpoint updated")
 		}
 	default:
-		logrus.Warningf("got unexpected event: %v", event)
+		logrus.WithField("event", event).Warning("got unexpected event")
 	}
 	return nil
 }
 
 func (h *Handler) createCheckpointJob(cp *v1alpha1.Checkpoint) error {
-	if len(cp.Labels) == 0 {
-		return gerr.Wrap(err, "checkpoint object has no label")
+	if cp.Labels == nil {
+		cp.Labels = make(map[string]string, 4)
 	}
+	cp.Labels[v1alpha1.SchemeGroupVersion.String()+"/pod-name"] = cp.Spec.PodName
+	cp.Labels[v1alpha1.SchemeGroupVersion.String()+"/container-name"] = cp.Spec.ContainerName
+	cp.Labels[v1alpha1.SchemeGroupVersion.String()+"/node-name"] = cp.Status.NodeName
+
 	if cp.Spec.Selector == nil {
 		cp.Spec.Selector = &metav1.LabelSelector{}
 	}
@@ -66,13 +83,13 @@ func (h *Handler) createCheckpointJob(cp *v1alpha1.Checkpoint) error {
 
 	// check if checkpoint job created earlier
 	if cp.Status.JobRef.Name != "" {
-		logrus.Infof("checkpoint job %s already exists, do nothing", cp.Status.JobRef.Name)
+		logger(cp).WithField("job", cp.Status.JobRef.Name).Info("checkpoint job already exists, do nothing")
 		return nil
 	}
 	if job, err := queryCheckpointJob(cp); err != nil {
 		return gerr.Wrap(err, "query job for checkpoint failed")
 	} else if job != nil {
-		logrus.Infof("found existing checkpoint job %s, do nothing", job.Name)
+		logger(cp).WithField("job", job.Name).Info("found existing checkpoint job, reference to it")
 		referenceJob(cp, job)
 		return nil
 	}
@@ -102,9 +119,7 @@ func (h *Handler) createCheckpointJob(cp *v1alpha1.Checkpoint) error {
 			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(cp, v1alpha1.SchemeGVK)},
 			Labels:          cp.Labels,
 			Annotations: map[string]string{
-				v1alpha1.SchemeGroupVersion.String() + "/pod-name":       cp.Spec.PodName,
-				v1alpha1.SchemeGroupVersion.String() + "/container-name": cp.Spec.ContainerName,
-				v1alpha1.SchemeGroupVersion.String() + "/node-name":      cp.Status.NodeName,
+				v1alpha1.SchemeGroupVersion.String() + "/controller": v1alpha1.OperatorName,
 			},
 		},
 		Spec: batchv1.JobSpec{
@@ -112,13 +127,11 @@ func (h *Handler) createCheckpointJob(cp *v1alpha1.Checkpoint) error {
 			Completions: &one,
 			Template: v1.PodTemplateSpec{
 				Spec: v1.PodSpec{
-					// todo: mount /var/docker.sock
-					Volumes: []v1.Volume{},
+					Volumes: []v1.Volume{}, // todo
 					Containers: []v1.Container{{
 						Name:  "runner",
-						Image: "", // todo...
+						Image: h.cfg.CheckpointWorkerImage,
 					}},
-					NodeSelector:     map[string]string{string(kubeletapis.LabelHostname): cp.Status.NodeName},
 					NodeName:         cp.Status.NodeName,
 					ImagePullSecrets: []v1.LocalObjectReference{{Name: h.cfg.ImagePullSecret}},
 				},
@@ -135,7 +148,7 @@ func (h *Handler) createCheckpointJob(cp *v1alpha1.Checkpoint) error {
 	if err != nil || job == nil {
 		return gerr.Wrap(err, "query created checkpoint job failed")
 	}
-	logrus.Infof("checkpoint job created for %s/%s ", cp.Namespace, cp.Name)
+	logger(cp).WithField("job", job.Name).Info("created checkpoint job")
 	referenceJob(cp, job)
 
 	return nil
@@ -143,14 +156,14 @@ func (h *Handler) createCheckpointJob(cp *v1alpha1.Checkpoint) error {
 
 func queryCheckpointJob(cp *v1alpha1.Checkpoint) (*batchv1.Job, error) {
 	// list jobs by labels.
-	selectors := make([]string, 0, len(cp.Spec.LabelSelector.MatchLabels))
-	for k, v := range cp.cp.Spec.LabelSelector.MatchLabels {
+	selectors := make([]string, 0, len(cp.Spec.Selector.MatchLabels))
+	for k, v := range cp.Spec.Selector.MatchLabels {
 		selectors = append(selectors, k+"="+v)
 	}
 	jobs := &batchv1.JobList{
 		TypeMeta: metav1.TypeMeta{Kind: "Job", APIVersion: batchv1.SchemeGroupVersion.String()},
 	}
-	ops := &metav1.ListOptions{
+	opts := &metav1.ListOptions{
 		TypeMeta:             metav1.TypeMeta{Kind: "Job", APIVersion: batchv1.SchemeGroupVersion.String()},
 		LabelSelector:        strings.Join(selectors, ","),
 		IncludeUninitialized: true,
@@ -161,27 +174,16 @@ func queryCheckpointJob(cp *v1alpha1.Checkpoint) (*batchv1.Job, error) {
 	}
 
 	for _, job := range jobs.Items {
-		for _, owner := range job.GetObjectMeta().GetOwnerReferences() {
-			if owner.Kind == "Checkpoint" &&
-				owner.APIVersion == v1alpha1.SchemeGroupVersion.String() &&
-				owner.Namespace == cp.Namespace &&
-				owner.Name == cp.Name &&
-				owner.UID == cp.UID {
-				return &job, nil
-			}
+		if metav1.IsControlledBy(&job, cp) {
+			return &job, nil
 		}
 	}
 	return nil, nil
 }
 
 func referenceJob(cp *v1alpha1.Checkpoint, job *batchv1.Job) {
-	cp.Status.JobRef = v1.ObjectReference{
-		Kind:            "Job",
-		Namespace:       job.Namespace,
-		Name:            job.Name,
-		UID:             job.UID,
-		APIVersion:      batchv1.SchemeGroupVersion.String(),
-		ResourceVersion: job.ResourceVersion,
+	cp.Status.JobRef = v1.LocalObjectReference{
+		Name: job.Name,
 	}
 }
 
@@ -191,4 +193,45 @@ func podIsReady(pod *v1.Pod) bool {
 		return true
 	}
 	return false
+}
+
+func updateCheckpointByJob(job *batchv1.Job) error {
+	if !isCheckpointJob(job) {
+		logger(job).Debug("not a checkpoint job")
+		return nil
+	}
+
+	// query checkpoint
+	if len(job.OwnerReferences) == 0 {
+		return stderr.New("checkpoint job has no owner")
+	}
+	if len(job.OwnerReferences) > 1 {
+		return stderr.New("checkpoint job has too much owners")
+	}
+	owner := job.OwnerReferences[0]
+
+	cp := &v1alpha1.Checkpoint{
+		TypeMeta:   metav1.TypeMeta{Kind: "Checkpoint", APIVersion: v1alpha1.SchemeGroupVersion.String()},
+		ObjectMeta: metav1.ObjectMeta{Name: owner.Name, Namespace: job.Namespace, UID: owner.UID},
+	}
+	if err := sdk.Get(cp); err != nil {
+		return gerr.Wrap(err, "query checkpoint failed")
+	}
+
+	// update checkpoint conditions
+	cp.Status.Conditions = job.Status.Conditions
+	logger(cp).WithField("job", job.Name).Info("checkpoint conditions updated by job")
+	return nil
+}
+
+func isCheckpointJob(job *batchv1.Job) bool {
+	v, ok := job.GetObjectMeta().GetAnnotations()[v1alpha1.SchemeGroupVersion.String()+"/controller"]
+	return ok && v == v1alpha1.OperatorName
+}
+
+func logger(obj metav1.Object) *logrus.Entry {
+	return logrus.WithFields(logrus.Fields{
+		"name":      obj.GetName(),
+		"namespace": obj.GetNamespace(),
+	})
 }

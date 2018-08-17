@@ -5,6 +5,7 @@
 package v1alpha1
 
 import (
+	batchv1 "k8s.io/api/batch/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
@@ -15,7 +16,7 @@ func (in *Checkpoint) DeepCopyInto(out *Checkpoint) {
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
 	in.Spec.DeepCopyInto(&out.Spec)
-	out.Status = in.Status
+	in.Status.DeepCopyInto(&out.Status)
 	return
 }
 
@@ -96,6 +97,13 @@ func (in *CheckpointSpec) DeepCopy() *CheckpointSpec {
 func (in *CheckpointStatus) DeepCopyInto(out *CheckpointStatus) {
 	*out = *in
 	out.JobRef = in.JobRef
+	if in.Conditions != nil {
+		in, out := &in.Conditions, &out.Conditions
+		*out = make([]batchv1.JobCondition, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
 	return
 }
 

@@ -5,6 +5,7 @@ import (
 	"runtime"
 
 	stub "qiniu-ava/checkpoint-operator/pkg/stub"
+
 	sdk "github.com/operator-framework/operator-sdk/pkg/sdk"
 	k8sutil "github.com/operator-framework/operator-sdk/pkg/util/k8sutil"
 	sdkVersion "github.com/operator-framework/operator-sdk/version"
@@ -22,16 +23,25 @@ func main() {
 	printVersion()
 
 	sdk.ExposeMetricsPort()
-
-	resource := "ava.qiniu.com/v1alpha1"
-	kind := "Checkpoint"
 	namespace, err := k8sutil.GetWatchNamespace()
 	if err != nil {
 		logrus.Fatalf("Failed to get watch namespace: %v", err)
 	}
 	resyncPeriod := 5
-	logrus.Infof("Watching %s, %s, %s, %d", resource, kind, namespace, resyncPeriod)
-	sdk.Watch(resource, kind, namespace, resyncPeriod)
+	{
+		// watch on checkpoints to create worker jobs
+		resource := "ava.qiniu.com/v1alpha1"
+		kind := "Checkpoint"
+		logrus.Infof("Watching %s, %s, %s, %d", resource, kind, namespace, resyncPeriod)
+		sdk.Watch(resource, kind, namespace, resyncPeriod)
+	}
+	{
+		// watch on jobs to update checkpoint status
+		resource := "batch/v1"
+		kind := "Job"
+		logrus.Infof("Watching %s, %s, %s, %d", resource, kind, namespace, resyncPeriod)
+		sdk.Watch(resource, kind, namespace, resyncPeriod)
+	}
 	sdk.Handle(stub.NewHandler())
 	sdk.Run(context.TODO())
 }

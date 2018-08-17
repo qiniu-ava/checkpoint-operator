@@ -12,6 +12,8 @@ const (
 	version   = "v1alpha1"
 	groupName = "ava.qiniu.com"
 	kind      = "Checkpoint"
+
+	OperatorName = "checkpoint-operator"
 )
 
 var (
