@@ -32,6 +32,12 @@ type CheckpointSpec struct {
 	// 'my-docker-registry-server' will be retrieved from ImagePushSecret
 	ImageName string `json:"imageName"`
 
+	// A label query over jobs.
+	// Normally, the system sets this field for you.
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors
+	// +optional
+	Selector *metav1.LabelSelector `json:"selector,omitempty" protobuf:"bytes,4,opt,name=selector"`
+
 	// ImagePushSecret is a reference to a docker-registry secret in the same namespace to use for pushing checkout image,
 	// same as an ImagePullSecret.
 	// More info: https://kubernetes.io/docs/concepts/containers/images#specifying-imagepullsecrets-on-a-pod
