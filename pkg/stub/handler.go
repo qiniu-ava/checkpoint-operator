@@ -225,8 +225,8 @@ func updateCheckpointByJob(job *batchv1.Job) error {
 }
 
 func isCheckpointJob(job *batchv1.Job) bool {
-	v, ok := job.GetObjectMeta().GetAnnotations()[v1alpha1.SchemeGroupVersion.String()+"/controller"]
-	return ok && v == v1alpha1.OperatorName
+	owner := metav1.GetControllerOf(job)
+	return owner.Kind == v1alpha1.SchemeGroupVersion.String()
 }
 
 func logger(obj metav1.Object) *logrus.Entry {
