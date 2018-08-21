@@ -2,6 +2,9 @@ package worker
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	stderr "errors"
 	"io"
 	"io/ioutil"
 
@@ -15,25 +18,28 @@ import (
 )
 
 type DockerClient struct {
-	c *client.Client
+	c    client.APIClient
+	conf DockerConfig
 }
 
-func NewDockerClient(version string) (*DockerClient, error) {
+func NewDockerClient(conf DockerConfig, version string) (*DockerClient, error) {
 	c, e := client.NewClientWithOpts(client.FromEnv, client.WithVersion(version))
 	if e != nil {
 		return nil, e
 	}
-	return &DockerClient{c: c}, nil
+	return &DockerClient{c: c, conf: conf}, nil
 }
 
 func (dc *DockerClient) Checkpoint(ctx context.Context, opt *CheckpointOptions) error {
 	l := logrus.WithFields(logrus.Fields{"container": opt.Container, "image": opt.Image})
 	l.Info("creating checkpoint")
+	l.WithField("options", opt).Debug("checkpoint options")
 
 	ref, e := reference.ParseNormalizedNamed(opt.Image)
 	if e != nil {
 		return errors.Wrap(e, "parse image name failed")
 	}
+	l.WithFields(logrus.Fields{"reference": ref, "familiar": reference.FamiliarString(ref)}).Debug("got reference")
 
 	idRes, e := dc.c.ContainerCommit(ctx, opt.Container, types.ContainerCommitOptions{
 		Reference: ref.String(),
@@ -46,10 +52,19 @@ func (dc *DockerClient) Checkpoint(ctx context.Context, opt *CheckpointOptions) 
 	if e != nil {
 		return errors.Wrap(e, "commit container failed")
 	}
-	l.WithField("commitID", idRes.ID).Info("checkpoint committed")
+	l = l.WithField("id", idRes.ID)
+	l.Info("checkpoint committed")
 
+	auth, e := dc.getAuth(ref)
+	if e != nil {
+		return errors.Wrap(e, "encode auth failed")
+	}
+	l.WithField("auth", auth).Debug()
 	resp, e := dc.c.ImagePush(ctx, reference.FamiliarString(ref), types.ImagePushOptions{
-		RegistryAuth: opt.Auth,
+		RegistryAuth: auth,
+		PrivilegeFunc: func() (string, error) {
+			return auth, nil
+		},
 	})
 	defer func() {
 		io.CopyN(ioutil.Discard, resp, 512)
@@ -61,8 +76,21 @@ func (dc *DockerClient) Checkpoint(ctx context.Context, opt *CheckpointOptions) 
 
 	defer resp.Close()
 	if e := jsonmessage.DisplayJSONMessagesStream(resp, l.Writer(), 0, false, nil); e != nil {
-		return errors.Wrap(e, "push image filed")
+		return errors.Wrap(e, "push image failed")
 	}
 	l.Info("checkpoint pushed")
 	return nil
+}
+
+func (dc *DockerClient) getAuth(ref reference.Named) (string, error) {
+	auth, exists := dc.conf[reference.Domain(ref)]
+	if !exists {
+		return "", stderr.New("no registry authentication found")
+	}
+	buf, e := json.Marshal(auth)
+	if e != nil {
+		return "", errors.Wrap(e, "marshal auth config failed")
+	}
+
+	return base64.URLEncoding.EncodeToString(buf), nil
 }

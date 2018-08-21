@@ -2,12 +2,20 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
+	"os"
 	"runtime"
 
 	"qiniu-ava/checkpoint-operator/pkg/worker"
 
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+)
+
+const (
+	defaultDockerVersion = "1.38"
+	defaultDockerConfig  = "/config/.dockercfg"
 )
 
 func printVersion() {
@@ -17,45 +25,76 @@ func printVersion() {
 
 func main() {
 	printVersion()
-	conf, opt, e := loadOptions()
+	conf, e := loadConfig()
 	if e != nil {
-		logrus.Fatal("load checkpoint options failed: ", e)
+		logrus.WithField("error", e).Fatal("load checkpoint options failed: ", e)
 	}
-	c, e := worker.NewDockerClient(conf.Version)
+	if conf.Verbose {
+		logrus.SetLevel(logrus.DebugLevel)
+	} else {
+		logrus.SetLevel(logrus.InfoLevel)
+	}
+
+	c, e := worker.NewDockerClient(conf.DockerConfig, conf.Version)
 	if e != nil {
-		logrus.Fatal("create docker client failed: ", e)
+		logrus.WithField("error", e).Fatal("create docker client failed")
 	}
 
 	ctx := context.Background()
 	go waitForInterruption(ctx)
 
-	if e := c.Checkpoint(ctx, opt); e != nil {
+	if e := c.Checkpoint(ctx, conf.Options); e != nil {
 		logrus.WithField("error", e).Fatal("commit and push checkpoint failed")
 	}
 	logrus.Info("commit and push checkpoint succeed")
 }
 
 type config struct {
-	Version string
+	Version      string
+	Verbose      bool
+	DockerConfig worker.DockerConfig
+	Options      *worker.CheckpointOptions
 }
 
-func loadOptions() (*config, *worker.CheckpointOptions, error) {
+func loadConfig() (*config, error) {
 	o := &worker.CheckpointOptions{}
 	flag.StringVar(&(o.Container), "container", "", "container name going to have a checkpoint")
 	flag.StringVar(&(o.Image), "image", "", "full image name of the checkpoint")
-	flag.StringVar(&(o.Auth), "auth", "", "registry authentication header, base64 encoded")
 	flag.StringVar(&(o.Author), "author", "", "checkpoint author")
 	flag.StringVar(&(o.Comment), "comment", "", "image comment")
 
 	conf := &config{}
-	flag.StringVar(&(conf.Version), "version", "1.38", "docker client api version")
+	flag.StringVar(&(conf.Version), "version", defaultDockerVersion, "docker client api version, default to "+defaultDockerVersion)
+	flag.BoolVar(&(conf.Verbose), "verbose", false, "verbose")
+
+	var configPath string
+	flag.StringVar(&(configPath), "config", defaultDockerConfig, "docker config file path, default to "+defaultDockerConfig)
 
 	flag.Parse()
 
 	if e := o.Validate(); e != nil {
-		return nil, nil, e
+		return nil, e
 	}
-	return conf, o, nil
+	df, e := loadDockerConfig(configPath)
+	if e != nil {
+		return nil, e
+	}
+	conf.DockerConfig = df
+	conf.Options = o
+
+	return conf, nil
+}
+
+func loadDockerConfig(path string) (worker.DockerConfig, error) {
+	f, e := os.Open(path)
+	if e != nil {
+		return nil, errors.Wrap(e, "open docker config file failed")
+	}
+	conf := make(worker.DockerConfig)
+	if e := json.NewDecoder(f).Decode(&conf); e != nil {
+		return nil, errors.Wrap(e, "unmarshal docker config failed")
+	}
+	return conf, nil
 }
 
 func waitForInterruption(ctx context.Context) {
