@@ -16,15 +16,23 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-const listLimit = 16
+const (
+	listLimit = 16
 
-var (
-	truevalue       = true
-	one       int32 = 1
+	dockerSocketPath = "/var/run/docker.sock"
+	dockerConfigDir  = "/config"
+	dockerConfigName = ".dockercfg"
 )
 
-func NewHandler() sdk.Handler {
-	return &Handler{}
+var (
+	truevalue                      = true
+	one            int32           = 1
+	readOnly       int32           = 0400
+	hostPathSocket v1.HostPathType = v1.HostPathSocket
+)
+
+func NewHandler(cfg *Config) sdk.Handler {
+	return &Handler{cfg: cfg}
 }
 
 type Handler struct {
@@ -32,8 +40,8 @@ type Handler struct {
 }
 
 type Config struct {
-	ImagePullSecret       string `json:"imagePullSecret"`
 	CheckpointWorkerImage string `json:"checkpointWorkerImage"`
+	ImagePullSecret       string `json:"imagePullSecret"`
 }
 
 func (h *Handler) Handle(ctx context.Context, event sdk.Event) error {
@@ -53,14 +61,13 @@ func (h *Handler) Handle(ctx context.Context, event sdk.Event) error {
 	case *batchv1.Job:
 		job := event.Object.(*batchv1.Job)
 		if event.Deleted {
-			logger(job).Info("checkpoint job deleted")
+			logger(job).Info("got job deletion event")
 		} else {
-			logger(job).Info("updating checkpoint job")
+			logger(job).Info("got job updating event")
 			if err := updateCheckpointByJob(job); err != nil {
 				logger(job).WithField("error", err).Error("failed to update checkpoint on job updated")
 				return err
 			}
-			logger(job).Info("checkpoint updated")
 		}
 	default:
 		logrus.WithField("event", event).Warning("got unexpected event")
@@ -106,6 +113,10 @@ func (h *Handler) createCheckpointJob(cp *v1alpha1.Checkpoint) error {
 		return stderr.New("pod is not ready for checkpoint")
 	}
 	cp.Status.NodeName = pod.Spec.NodeName
+	container := getContainerID(pod, cp.Spec.ContainerName)
+	if container == "" {
+		return stderr.New("container id not found")
+	}
 
 	// create checkpoint job
 	job := &batchv1.Job{
@@ -126,14 +137,49 @@ func (h *Handler) createCheckpointJob(cp *v1alpha1.Checkpoint) error {
 			Parallelism: &one,
 			Completions: &one,
 			Template: v1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: cp.Labels,
+					Annotations: map[string]string{
+						v1alpha1.SchemeGroupVersion.String() + "/controller": v1alpha1.OperatorName,
+					},
+				},
 				Spec: v1.PodSpec{
-					Volumes: []v1.Volume{}, // todo
-					Containers: []v1.Container{{
-						Name:  "runner",
-						Image: h.cfg.CheckpointWorkerImage,
+					Volumes: []v1.Volume{{
+						Name: "docker-socket",
+						VolumeSource: v1.VolumeSource{HostPath: &v1.HostPathVolumeSource{
+							Path: dockerSocketPath,
+							Type: &hostPathSocket,
+						}},
+					}, {
+						Name: "registry-secret",
+						VolumeSource: v1.VolumeSource{Secret: &v1.SecretVolumeSource{
+							SecretName:  cp.Spec.ImagePushSecret.Name,
+							DefaultMode: &readOnly,
+						}},
 					}},
-					NodeName:         cp.Status.NodeName,
-					ImagePullSecrets: []v1.LocalObjectReference{{Name: h.cfg.ImagePullSecret}},
+					Containers: []v1.Container{{
+						Name:  "worker",
+						Image: h.cfg.CheckpointWorkerImage,
+						Args: []string{
+							"--container=" + container,
+							"--image=" + cp.Spec.ImageName,
+						},
+						VolumeMounts: []v1.VolumeMount{{
+							Name:      "docker-socket",
+							MountPath: dockerSocketPath,
+						}, {
+							Name:      "registry-secret",
+							MountPath: dockerConfigDir,
+							SubPath:   dockerConfigName,
+						}},
+					}},
+					NodeName: cp.Status.NodeName,
+					ImagePullSecrets: func() []v1.LocalObjectReference {
+						if h.cfg.ImagePullSecret != "" {
+							return []v1.LocalObjectReference{{Name: h.cfg.ImagePullSecret}}
+						}
+						return nil
+					}(),
 				},
 			},
 		},
@@ -195,23 +241,24 @@ func podIsReady(pod *v1.Pod) bool {
 	return false
 }
 
+func getContainerID(pod *v1.Pod, name string) string {
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.Name == name {
+			return cs.ContainerID
+		}
+	}
+	return ""
+}
+
 func updateCheckpointByJob(job *batchv1.Job) error {
-	if !isCheckpointJob(job) {
+	owner := metav1.GetControllerOf(job)
+	if owner.APIVersion != v1alpha1.SchemeGroupVersion.String() || owner.Kind != v1alpha1.Kind {
 		logger(job).Debug("not a checkpoint job")
 		return nil
 	}
-
 	// query checkpoint
-	if len(job.OwnerReferences) == 0 {
-		return stderr.New("checkpoint job has no owner")
-	}
-	if len(job.OwnerReferences) > 1 {
-		return stderr.New("checkpoint job has too much owners")
-	}
-	owner := job.OwnerReferences[0]
-
 	cp := &v1alpha1.Checkpoint{
-		TypeMeta:   metav1.TypeMeta{Kind: "Checkpoint", APIVersion: v1alpha1.SchemeGroupVersion.String()},
+		TypeMeta:   metav1.TypeMeta{Kind: v1alpha1.Kind, APIVersion: v1alpha1.SchemeGroupVersion.String()},
 		ObjectMeta: metav1.ObjectMeta{Name: owner.Name, Namespace: job.Namespace, UID: owner.UID},
 	}
 	if err := sdk.Get(cp); err != nil {
@@ -222,11 +269,6 @@ func updateCheckpointByJob(job *batchv1.Job) error {
 	cp.Status.Conditions = job.Status.Conditions
 	logger(cp).WithField("job", job.Name).Info("checkpoint conditions updated by job")
 	return nil
-}
-
-func isCheckpointJob(job *batchv1.Job) bool {
-	owner := metav1.GetControllerOf(job)
-	return owner.Kind == v1alpha1.SchemeGroupVersion.String()
 }
 
 func logger(obj metav1.Object) *logrus.Entry {
