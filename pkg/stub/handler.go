@@ -52,16 +52,16 @@ type Config struct {
 func (h *Handler) Handle(ctx context.Context, event sdk.Event) error {
 	switch event.Object.(type) {
 	case *v1alpha1.Snapshot:
-		cp := event.Object.(*v1alpha1.Snapshot)
+		ss := event.Object.(*v1alpha1.Snapshot)
 		if event.Deleted {
-			logger(cp).Debug("deleting snapshot")
+			logger(ss).Debug("deleting snapshot")
 		} else {
-			logger(cp).Info("updating snapshot")
-			if err := h.onSnapshotUpdating(cp); err != nil {
-				logger(cp).WithField("error", err).Error("failed to update snapshot job")
+			logger(ss).Info("updating snapshot")
+			if err := h.onSnapshotUpdating(ss); err != nil {
+				logger(ss).WithField("error", err).Error("failed to update snapshot job")
 				return err
 			}
-			logger(cp).Info("snapshot updated")
+			logger(ss).Info("snapshot updated")
 		}
 	case *batchv1.Job:
 		job := event.Object.(*batchv1.Job)
@@ -80,23 +80,23 @@ func (h *Handler) Handle(ctx context.Context, event sdk.Event) error {
 	return nil
 }
 
-func (h *Handler) onSnapshotUpdating(cp *v1alpha1.Snapshot) (e error) {
+func (h *Handler) onSnapshotUpdating(ss *v1alpha1.Snapshot) (e error) {
 	// check if checkpoint created earlier
 	var stale bool
 	defer func() {
 		if stale {
-			logger(cp).Info("updating stale snapshot")
-			if err := sdk.Update(cp); err != nil {
+			logger(ss).Info("updating stale snapshot")
+			if err := sdk.Update(ss); err != nil {
 				e = gerr.Wrap(err, "update snapshot failed")
 			}
 		}
 	}()
 
-	if job, err := querySnapshotJob(cp); err != nil {
+	if job, err := querySnapshotJob(ss); err != nil {
 		return gerr.Wrap(err, "query job for snapshot failed")
 	} else if job != nil {
-		stale = updateCondition(cp, job)
-		logger(cp).WithField("job", job.Name).Debug("found existing snapshot job")
+		stale = updateCondition(ss, job)
+		logger(ss).WithField("job", job.Name).Debug("found existing snapshot job")
 		return nil
 	}
 
@@ -104,39 +104,39 @@ func (h *Handler) onSnapshotUpdating(cp *v1alpha1.Snapshot) (e error) {
 	// 1. find the container going to have a snapshot
 	pod := &v1.Pod{
 		TypeMeta:   metav1.TypeMeta{Kind: "Pod", APIVersion: v1.SchemeGroupVersion.String()},
-		ObjectMeta: metav1.ObjectMeta{Name: cp.Spec.PodName, Namespace: cp.Namespace},
+		ObjectMeta: metav1.ObjectMeta{Name: ss.Spec.PodName, Namespace: ss.Namespace},
 	}
 	if err := sdk.Get(pod); err != nil {
 		return gerr.Wrap(err, "get pod info failed")
 	}
-	logger(cp).Debug("found snapshoting pod")
+	logger(ss).Debug("found snapshoting pod")
 	if pod.Spec.NodeName == "" || (pod.Status.Phase != v1.PodRunning && pod.Status.Phase != v1.PodSucceeded) {
-		cp.Status.Conditions = []v1alpha1.SnapshotCondition{
+		ss.Status.Conditions = []v1alpha1.SnapshotCondition{
 			*newCondition(v1alpha1.SnapshotFailed, "PodUnavailable", "pod is unavailable to have a snapshot"),
 		}
 		stale = true
 		return stderr.New("pod is not ready for snapshoting")
 	}
-	cp.Status.NodeName = pod.Spec.NodeName
-	container := getContainerID(pod, cp.Spec.ContainerName)
+	ss.Status.NodeName = pod.Spec.NodeName
+	container := getContainerID(pod, ss.Spec.ContainerName)
 	if container == "" {
 		return stderr.New("container id not found")
 	}
 
 	// 2. complete the snapshot spec
-	if cp.Labels == nil {
-		cp.Labels = make(map[string]string, 4)
+	if ss.Labels == nil {
+		ss.Labels = make(map[string]string, 4)
 	}
-	cp.Labels[labelPrefix+"_pod-name"] = cp.Spec.PodName
-	cp.Labels[labelPrefix+"_container-name"] = cp.Spec.ContainerName
-	cp.Labels[labelPrefix+"_node-name"] = cp.Status.NodeName
+	ss.Labels[labelPrefix+"_pod-name"] = ss.Spec.PodName
+	ss.Labels[labelPrefix+"_container-name"] = ss.Spec.ContainerName
+	ss.Labels[labelPrefix+"_node-name"] = ss.Status.NodeName
 
-	if cp.Spec.Selector == nil {
-		cp.Spec.Selector = &metav1.LabelSelector{}
+	if ss.Spec.Selector == nil {
+		ss.Spec.Selector = &metav1.LabelSelector{}
 	}
-	cp.Spec.Selector.MatchLabels = cp.Labels
+	ss.Spec.Selector.MatchLabels = ss.Labels
 	stale = true
-	logger(cp).Debug("snapshot updated with labels")
+	logger(ss).Debug("snapshot updated with labels")
 
 	// 3. create snapshot job
 	job := &batchv1.Job{
@@ -145,10 +145,10 @@ func (h *Handler) onSnapshotUpdating(cp *v1alpha1.Snapshot) (e error) {
 			APIVersion: batchv1.SchemeGroupVersion.String(),
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName:    cp.Name + "-",
+			GenerateName:    ss.Name + "-",
 			Namespace:       pod.Namespace,
-			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(cp, v1alpha1.SchemeGVK)},
-			Labels:          cp.Labels,
+			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(ss, v1alpha1.SchemeGVK)},
+			Labels:          ss.Labels,
 			Annotations: map[string]string{
 				labelPrefix + "_controller": v1alpha1.OperatorName,
 			},
@@ -159,7 +159,7 @@ func (h *Handler) onSnapshotUpdating(cp *v1alpha1.Snapshot) (e error) {
 			ActiveDeadlineSeconds: &workerDeadlineSeconds,
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: cp.Labels,
+					Labels: ss.Labels,
 					Annotations: map[string]string{
 						labelPrefix + "_controller": v1alpha1.OperatorName,
 					},
@@ -167,7 +167,7 @@ func (h *Handler) onSnapshotUpdating(cp *v1alpha1.Snapshot) (e error) {
 				Spec: v1.PodSpec{
 					RestartPolicy:         v1.RestartPolicyOnFailure,
 					ActiveDeadlineSeconds: &workerDeadlineSeconds,
-					NodeName:              cp.Status.NodeName,
+					NodeName:              ss.Status.NodeName,
 					ImagePullSecrets: func() []v1.LocalObjectReference {
 						if h.cfg.ImagePullSecret != "" {
 							return []v1.LocalObjectReference{{Name: h.cfg.ImagePullSecret}}
@@ -181,7 +181,7 @@ func (h *Handler) onSnapshotUpdating(cp *v1alpha1.Snapshot) (e error) {
 						Args: func() []string {
 							args := []string{
 								"--container=" + container,
-								"--image=" + cp.Spec.ImageName,
+								"--image=" + ss.Spec.ImageName,
 							}
 							if h.cfg.Verbose {
 								args = append(args, "--verbose")
@@ -207,7 +207,7 @@ func (h *Handler) onSnapshotUpdating(cp *v1alpha1.Snapshot) (e error) {
 					}, {
 						Name: "registry-secret",
 						VolumeSource: v1.VolumeSource{Secret: &v1.SecretVolumeSource{
-							SecretName:  cp.Spec.ImagePushSecret.Name,
+							SecretName:  ss.Spec.ImagePushSecret.Name,
 							DefaultMode: &readOnly,
 						}},
 					}},
@@ -219,20 +219,20 @@ func (h *Handler) onSnapshotUpdating(cp *v1alpha1.Snapshot) (e error) {
 	// update snapshot before creating job, to elimate concurrently updating to snapshot
 	if stale {
 		stale = false
-		if err := sdk.Update(cp); err != nil {
+		if err := sdk.Update(ss); err != nil {
 			return gerr.Wrap(err, "update snapshot failed")
 		}
 	}
 
-	logger(cp).Info("creating snapshot job")
+	logger(ss).Info("creating snapshot job")
 	return sdk.Create(job)
 }
 
-func querySnapshotJob(cp *v1alpha1.Snapshot) (*batchv1.Job, error) {
+func querySnapshotJob(ss *v1alpha1.Snapshot) (*batchv1.Job, error) {
 	// check jobRef
-	if cp.Status.JobRef.Name != "" {
+	if ss.Status.JobRef.Name != "" {
 		job := &batchv1.Job{
-			ObjectMeta: metav1.ObjectMeta{Name: cp.Status.JobRef.Name, Namespace: cp.GetNamespace()},
+			ObjectMeta: metav1.ObjectMeta{Name: ss.Status.JobRef.Name, Namespace: ss.GetNamespace()},
 			TypeMeta:   metav1.TypeMeta{Kind: "Job", APIVersion: batchv1.SchemeGroupVersion.String()},
 		}
 		if err := sdk.Get(job); err != nil && !errors.IsNotFound(err) {
@@ -245,8 +245,8 @@ func querySnapshotJob(cp *v1alpha1.Snapshot) (*batchv1.Job, error) {
 
 	// list jobs by labels.
 	selectors := make([]string, 0)
-	if cp.Spec.Selector != nil {
-		for k, v := range cp.Spec.Selector.MatchLabels {
+	if ss.Spec.Selector != nil {
+		for k, v := range ss.Spec.Selector.MatchLabels {
 			selectors = append(selectors, k+"="+v)
 		}
 	}
@@ -259,23 +259,23 @@ func querySnapshotJob(cp *v1alpha1.Snapshot) (*batchv1.Job, error) {
 		IncludeUninitialized: true,
 		Limit:                listLimit,
 	}
-	if err := sdk.List(cp.Namespace, jobs, sdk.WithListOptions(opts)); err != nil && !errors.IsNotFound(err) {
+	if err := sdk.List(ss.Namespace, jobs, sdk.WithListOptions(opts)); err != nil && !errors.IsNotFound(err) {
 		return nil, gerr.Wrap(err, "list snapshot jobs failed")
 	}
 
 	// find job created by snapshot
 	for _, job := range jobs.Items {
-		if metav1.IsControlledBy(&job, cp) {
-			cp.Status.JobRef.Name = job.Name
-			logger(cp).WithField("job", job.Name).Debug("found job for snapshot with selector")
+		if metav1.IsControlledBy(&job, ss) {
+			ss.Status.JobRef.Name = job.Name
+			logger(ss).WithField("job", job.Name).Debug("found job for snapshot with selector")
 			return &job, nil
 		}
 	}
 	return nil, nil
 }
 
-func updateCondition(cp *v1alpha1.Snapshot, job *batchv1.Job) (stale bool) {
-	cp.Status.JobRef = v1.LocalObjectReference{Name: job.Name}
+func updateCondition(ss *v1alpha1.Snapshot, job *batchv1.Job) (stale bool) {
+	ss.Status.JobRef = v1.LocalObjectReference{Name: job.Name}
 	var cond *v1alpha1.SnapshotCondition
 	for _, c := range job.Status.Conditions {
 		if c.Status == v1.ConditionTrue {
@@ -294,18 +294,18 @@ func updateCondition(cp *v1alpha1.Snapshot, job *batchv1.Job) (stale bool) {
 	}
 
 	newCondition := true
-	for i, c := range cp.Status.Conditions {
+	for i, c := range ss.Status.Conditions {
 		if c.Type == cond.Type {
 			if c.Status == cond.Status {
 				return false
 			}
-			cp.Status.Conditions[i] = *cond
+			ss.Status.Conditions[i] = *cond
 			newCondition = false
 			break
 		}
 	}
 	if newCondition {
-		cp.Status.Conditions = append(cp.Status.Conditions, *cond)
+		ss.Status.Conditions = append(ss.Status.Conditions, *cond)
 	}
 	return true
 }
@@ -337,19 +337,19 @@ func (h *Handler) onUpdatingJob(job *batchv1.Job) error {
 		return nil
 	}
 	// query snapshot
-	cp := &v1alpha1.Snapshot{
+	ss := &v1alpha1.Snapshot{
 		TypeMeta:   metav1.TypeMeta{Kind: v1alpha1.Kind, APIVersion: v1alpha1.SchemeGroupVersion.String()},
 		ObjectMeta: metav1.ObjectMeta{Name: owner.Name, Namespace: job.Namespace, UID: owner.UID},
 	}
-	if err := sdk.Get(cp); err != nil {
+	if err := sdk.Get(ss); err != nil {
 		return gerr.Wrap(err, "query snapshot failed")
 	}
 
 	// update snapshot conditions
-	stale := updateCondition(cp, job)
+	stale := updateCondition(ss, job)
 	if stale {
-		logger(cp).WithField("job", job.Name).Info("updating snapshot conditions")
-		if err := sdk.Update(cp); err != nil {
+		logger(ss).WithField("job", job.Name).Info("updating snapshot conditions")
+		if err := sdk.Update(ss); err != nil {
 			return gerr.Wrap(err, "update snapshot with condition change failed")
 		}
 	}

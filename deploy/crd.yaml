@@ -10,7 +10,7 @@ spec:
     plural: snapshots
     singular: snapshot
     shortNames:
-    - chp
+    - snp
   scope: Namespaced
   version: v1alpha1
   validations:
