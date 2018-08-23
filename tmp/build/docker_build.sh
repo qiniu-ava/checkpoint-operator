@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-REG=""
-TAG=""
+REG="reg.qiniu.com/ava-os"
+TAG="latest"
 
 PUSH=false
 CONTROLLER=false
