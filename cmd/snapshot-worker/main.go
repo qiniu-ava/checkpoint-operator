@@ -2,20 +2,17 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
-	"os"
 	"runtime"
 
 	"qiniu-ava/snapshot-operator/pkg/worker"
 
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
 
 const (
 	defaultDockerVersion = "1.38"
-	defaultDockerConfig  = "/config/.dockerconfigjson"
+	defaultDockerConfig  = "/config"
 )
 
 func printVersion() {
@@ -35,7 +32,7 @@ func main() {
 		logrus.SetLevel(logrus.InfoLevel)
 	}
 
-	c, e := worker.NewDockerClient(conf.DockerAuth, conf.Version)
+	c, e := worker.NewDockerClient(conf.DockerConfigDir, conf.Version)
 	if e != nil {
 		logrus.WithField("error", e).Fatal("create docker client failed")
 	}
@@ -49,10 +46,10 @@ func main() {
 }
 
 type config struct {
-	Version    string
-	Verbose    bool
-	DockerAuth worker.DockerAuth
-	Options    *worker.SnapshotOptions
+	Version         string
+	Verbose         bool
+	Options         *worker.SnapshotOptions
+	DockerConfigDir string
 }
 
 func loadConfig() (*config, error) {
@@ -65,35 +62,14 @@ func loadConfig() (*config, error) {
 	conf := &config{}
 	flag.StringVar(&(conf.Version), "version", defaultDockerVersion, "docker client api version, default to "+defaultDockerVersion)
 	flag.BoolVar(&(conf.Verbose), "verbose", false, "verbose")
-
-	var configPath string
-	flag.StringVar(&(configPath), "config", defaultDockerConfig, "docker config file path, default to "+defaultDockerConfig)
+	flag.StringVar(&(conf.DockerConfigDir), "config-dir", defaultDockerConfig, "docker config directory, default to "+defaultDockerConfig)
 
 	flag.Parse()
 
 	if e := o.Validate(); e != nil {
 		return nil, e
 	}
-	auth, e := loadDockerConfig(configPath)
-	if e != nil {
-		return nil, e
-	}
-	conf.DockerAuth = auth
 	conf.Options = o
 
 	return conf, nil
-}
-
-func loadDockerConfig(path string) (worker.DockerAuth, error) {
-	f, e := os.Open(path)
-	if e != nil {
-		return nil, errors.Wrap(e, "open docker config file failed")
-	}
-	conf := struct {
-		Auths worker.DockerAuth `json:"auths"`
-	}{}
-	if e := json.NewDecoder(f).Decode(&conf); e != nil {
-		return nil, errors.Wrap(e, "unmarshal docker config failed")
-	}
-	return conf.Auths, nil
 }

@@ -25,4 +25,4 @@ func (o *SnapshotOptions) Validate() error {
 	return nil
 }
 
-type DockerAuth map[string]types.AuthConfig
+type DockerAuths map[string]types.AuthConfig
