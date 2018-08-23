@@ -15,7 +15,7 @@ import (
 
 const (
 	defaultDockerVersion = "1.38"
-	defaultDockerConfig  = "/config/.dockercfg"
+	defaultDockerConfig  = "/config/.dockerconfigjson"
 )
 
 func printVersion() {

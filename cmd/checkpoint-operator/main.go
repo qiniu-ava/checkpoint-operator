@@ -65,8 +65,12 @@ type config struct {
 func loadConfig() *config {
 	var verbose bool
 	flag.BoolVar(&verbose, "verbose", false, "print debug log")
+
 	cfg := &stub.Config{}
 	flag.StringVar(&(cfg.CheckpointWorkerImage), "worker-image", workerImage, "checkpoint worker image, default to "+workerImage)
 	flag.StringVar(&(cfg.ImagePullSecret), "pull-secret", "", "registry secret used to pull worker image")
+	flag.Parse()
+
+	cfg.Verbose = verbose
 	return &config{verbose: verbose, Config: cfg}
 }
