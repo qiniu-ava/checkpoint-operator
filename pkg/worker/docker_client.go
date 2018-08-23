@@ -105,12 +105,11 @@ func (dc *DockerClient) getAuth(ref reference.Named) (string, error) {
 }
 
 func loadDockerAuths(dir string) (DockerAuths, error) {
-	_, e := os.Stat(filepath.Join(dir, v1.DockerConfigKey))
-	if e == nil {
+	logrus.WithField("dir", dir).Debug("looking for docker config file")
+	if _, e := os.Stat(filepath.Join(dir, v1.DockerConfigKey)); e == nil {
 		return loadAuthsFromDockerCfg(filepath.Join(dir, v1.DockerConfigKey))
 	} else if os.IsNotExist(e) {
-		_, e = os.Stat(filepath.Join(dir, v1.DockerConfigJsonKey))
-		if e != nil {
+		if _, e = os.Stat(filepath.Join(dir, v1.DockerConfigJsonKey)); e == nil {
 			return loadAuthsFromDockerConfigJSON(filepath.Join(dir, v1.DockerConfigJsonKey))
 		}
 	}
@@ -119,6 +118,7 @@ func loadDockerAuths(dir string) (DockerAuths, error) {
 }
 
 func loadAuthsFromDockerCfg(path string) (DockerAuths, error) {
+	logrus.WithField("path", path).Debug("loading .dockercfg")
 	f, e := os.Open(path)
 	if e != nil {
 		return nil, errors.Wrap(e, "open DockerCfg file failed")
@@ -131,6 +131,7 @@ func loadAuthsFromDockerCfg(path string) (DockerAuths, error) {
 }
 
 func loadAuthsFromDockerConfigJSON(path string) (DockerAuths, error) {
+	logrus.WithField("path", path).Debug("loading .dockerconfigjson")
 	f, e := os.Open(path)
 	if e != nil {
 		return nil, errors.Wrap(e, "open DockerConfigJSON file failed")
