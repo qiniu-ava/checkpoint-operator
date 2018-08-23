@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"qiniu-ava/checkpoint-operator/pkg/apis/ava/v1alpha1"
+	"qiniu-ava/snapshot-operator/pkg/apis/ava/v1alpha1"
 
 	"github.com/operator-framework/operator-sdk/pkg/sdk"
 	gerr "github.com/pkg/errors"
@@ -20,7 +20,7 @@ import (
 const (
 	listLimit = 16
 
-	labelPrefix      = "checkpoint-operator.ava.qiniu.com"
+	labelPrefix      = "snapshot-operator.ava.qiniu.com"
 	dockerSocketPath = "/var/run/docker.sock"
 	dockerConfigDir  = "/config"
 	dockerConfigName = ".dockerconfigjson"
@@ -44,24 +44,24 @@ type Handler struct {
 }
 
 type Config struct {
-	CheckpointWorkerImage string `json:"checkpointWorkerImage,omitempty"`
-	ImagePullSecret       string `json:"imagePullSecret,omitempty"`
-	Verbose               bool   `json:"verbose,omitempty"`
+	SnapshotWorkerImage string `json:"snapshotWorkerImage,omitempty"`
+	ImagePullSecret     string `json:"imagePullSecret,omitempty"`
+	Verbose             bool   `json:"verbose,omitempty"`
 }
 
 func (h *Handler) Handle(ctx context.Context, event sdk.Event) error {
 	switch event.Object.(type) {
-	case *v1alpha1.Checkpoint:
-		cp := event.Object.(*v1alpha1.Checkpoint)
+	case *v1alpha1.Snapshot:
+		cp := event.Object.(*v1alpha1.Snapshot)
 		if event.Deleted {
-			logger(cp).Debug("deleting checkpoint")
+			logger(cp).Debug("deleting snapshot")
 		} else {
-			logger(cp).Info("updating checkpoint")
-			if err := h.onCheckpointUpdating(cp); err != nil {
-				logger(cp).WithField("error", err).Error("failed to update checkpoint job")
+			logger(cp).Info("updating snapshot")
+			if err := h.onSnapshotUpdating(cp); err != nil {
+				logger(cp).WithField("error", err).Error("failed to update snapshot job")
 				return err
 			}
-			logger(cp).Info("checkpoint updated")
+			logger(cp).Info("snapshot updated")
 		}
 	case *batchv1.Job:
 		job := event.Object.(*batchv1.Job)
@@ -80,28 +80,28 @@ func (h *Handler) Handle(ctx context.Context, event sdk.Event) error {
 	return nil
 }
 
-func (h *Handler) onCheckpointUpdating(cp *v1alpha1.Checkpoint) (e error) {
+func (h *Handler) onSnapshotUpdating(cp *v1alpha1.Snapshot) (e error) {
 	// check if checkpoint created earlier
 	var stale bool
 	defer func() {
 		if stale {
-			logger(cp).Info("updating stale checkpoint")
+			logger(cp).Info("updating stale snapshot")
 			if err := sdk.Update(cp); err != nil {
-				e = gerr.Wrap(err, "update checkpoint failed")
+				e = gerr.Wrap(err, "update snapshot failed")
 			}
 		}
 	}()
 
-	if job, err := queryCheckpointJob(cp); err != nil {
-		return gerr.Wrap(err, "query job for checkpoint failed")
+	if job, err := querySnapshotJob(cp); err != nil {
+		return gerr.Wrap(err, "query job for snapshot failed")
 	} else if job != nil {
 		stale = updateCondition(cp, job)
-		logger(cp).WithField("job", job.Name).Debug("found existing checkpoint job")
+		logger(cp).WithField("job", job.Name).Debug("found existing snapshot job")
 		return nil
 	}
 
-	// newly created checkpoint, create a job for it
-	// 1. find the container going to have a checkpoint
+	// newly created snapshot, create a job for it
+	// 1. find the container going to have a snapshot
 	pod := &v1.Pod{
 		TypeMeta:   metav1.TypeMeta{Kind: "Pod", APIVersion: v1.SchemeGroupVersion.String()},
 		ObjectMeta: metav1.ObjectMeta{Name: cp.Spec.PodName, Namespace: cp.Namespace},
@@ -109,13 +109,13 @@ func (h *Handler) onCheckpointUpdating(cp *v1alpha1.Checkpoint) (e error) {
 	if err := sdk.Get(pod); err != nil {
 		return gerr.Wrap(err, "get pod info failed")
 	}
-	logger(cp).Debug("found checkpointing pod")
+	logger(cp).Debug("found snapshoting pod")
 	if pod.Spec.NodeName == "" || (pod.Status.Phase != v1.PodRunning && pod.Status.Phase != v1.PodSucceeded) {
-		cp.Status.Conditions = []v1alpha1.CheckpointCondition{
-			*newCondition(v1alpha1.CheckpointFailed, "PodUnavailable", "pod is unavailable to have a checkpoint"),
+		cp.Status.Conditions = []v1alpha1.SnapshotCondition{
+			*newCondition(v1alpha1.SnapshotFailed, "PodUnavailable", "pod is unavailable to have a snapshot"),
 		}
 		stale = true
-		return stderr.New("pod is not ready for checkpointing")
+		return stderr.New("pod is not ready for snapshoting")
 	}
 	cp.Status.NodeName = pod.Spec.NodeName
 	container := getContainerID(pod, cp.Spec.ContainerName)
@@ -123,7 +123,7 @@ func (h *Handler) onCheckpointUpdating(cp *v1alpha1.Checkpoint) (e error) {
 		return stderr.New("container id not found")
 	}
 
-	// 2. complete the checkpoint spec
+	// 2. complete the snapshot spec
 	if cp.Labels == nil {
 		cp.Labels = make(map[string]string, 4)
 	}
@@ -136,9 +136,9 @@ func (h *Handler) onCheckpointUpdating(cp *v1alpha1.Checkpoint) (e error) {
 	}
 	cp.Spec.Selector.MatchLabels = cp.Labels
 	stale = true
-	logger(cp).Debug("checkpoint updated with labels")
+	logger(cp).Debug("snapshot updated with labels")
 
-	// 3. create checkpoint job
+	// 3. create snapshot job
 	job := &batchv1.Job{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Job",
@@ -177,7 +177,7 @@ func (h *Handler) onCheckpointUpdating(cp *v1alpha1.Checkpoint) (e error) {
 
 					Containers: []v1.Container{{
 						Name:  "worker",
-						Image: h.cfg.CheckpointWorkerImage,
+						Image: h.cfg.SnapshotWorkerImage,
 						Args: func() []string {
 							args := []string{
 								"--container=" + container,
@@ -216,19 +216,19 @@ func (h *Handler) onCheckpointUpdating(cp *v1alpha1.Checkpoint) (e error) {
 		},
 	}
 
-	// update checkpoint before creating job, to elimate concurrently updating to checkpoint
+	// update snapshot before creating job, to elimate concurrently updating to snapshot
 	if stale {
 		stale = false
 		if err := sdk.Update(cp); err != nil {
-			return gerr.Wrap(err, "update checkpoint failed")
+			return gerr.Wrap(err, "update snapshot failed")
 		}
 	}
 
-	logger(cp).Info("creating checkpoint job")
+	logger(cp).Info("creating snapshot job")
 	return sdk.Create(job)
 }
 
-func queryCheckpointJob(cp *v1alpha1.Checkpoint) (*batchv1.Job, error) {
+func querySnapshotJob(cp *v1alpha1.Snapshot) (*batchv1.Job, error) {
 	// check jobRef
 	if cp.Status.JobRef.Name != "" {
 		job := &batchv1.Job{
@@ -236,7 +236,7 @@ func queryCheckpointJob(cp *v1alpha1.Checkpoint) (*batchv1.Job, error) {
 			TypeMeta:   metav1.TypeMeta{Kind: "Job", APIVersion: batchv1.SchemeGroupVersion.String()},
 		}
 		if err := sdk.Get(job); err != nil && !errors.IsNotFound(err) {
-			return nil, gerr.Wrap(err, "get checkpoint job failed")
+			return nil, gerr.Wrap(err, "get snapshot job failed")
 		}
 		if job.GetUID() != "" {
 			return job, nil
@@ -260,30 +260,30 @@ func queryCheckpointJob(cp *v1alpha1.Checkpoint) (*batchv1.Job, error) {
 		Limit:                listLimit,
 	}
 	if err := sdk.List(cp.Namespace, jobs, sdk.WithListOptions(opts)); err != nil && !errors.IsNotFound(err) {
-		return nil, gerr.Wrap(err, "list checkpoint jobs failed")
+		return nil, gerr.Wrap(err, "list snapshot jobs failed")
 	}
 
-	// find job created by checkpoint
+	// find job created by snapshot
 	for _, job := range jobs.Items {
 		if metav1.IsControlledBy(&job, cp) {
 			cp.Status.JobRef.Name = job.Name
-			logger(cp).WithField("job", job.Name).Debug("found job for checkpoint with selector")
+			logger(cp).WithField("job", job.Name).Debug("found job for snapshot with selector")
 			return &job, nil
 		}
 	}
 	return nil, nil
 }
 
-func updateCondition(cp *v1alpha1.Checkpoint, job *batchv1.Job) (stale bool) {
+func updateCondition(cp *v1alpha1.Snapshot, job *batchv1.Job) (stale bool) {
 	cp.Status.JobRef = v1.LocalObjectReference{Name: job.Name}
-	var cond *v1alpha1.CheckpointCondition
+	var cond *v1alpha1.SnapshotCondition
 	for _, c := range job.Status.Conditions {
 		if c.Status == v1.ConditionTrue {
 			switch c.Type {
 			case batchv1.JobComplete:
-				cond = newCondition(v1alpha1.CheckpointComplete, "JobCompleted", "checkpoint job completed")
+				cond = newCondition(v1alpha1.SnapshotComplete, "JobCompleted", "snapshot job completed")
 			case batchv1.JobFailed:
-				cond = newCondition(v1alpha1.CheckpointFailed, "JobFailed", "checkpoint job failed")
+				cond = newCondition(v1alpha1.SnapshotFailed, "JobFailed", "snapshot job failed")
 			}
 			break
 		}
@@ -310,8 +310,8 @@ func updateCondition(cp *v1alpha1.Checkpoint, job *batchv1.Job) (stale bool) {
 	return true
 }
 
-func newCondition(cond v1alpha1.CheckpointConditionType, reason, message string) *v1alpha1.CheckpointCondition {
-	return &v1alpha1.CheckpointCondition{
+func newCondition(cond v1alpha1.SnapshotConditionType, reason, message string) *v1alpha1.SnapshotCondition {
+	return &v1alpha1.SnapshotCondition{
 		Type:               cond,
 		Status:             v1.ConditionTrue,
 		LastProbeTime:      metav1.Now(),
@@ -333,24 +333,24 @@ func getContainerID(pod *v1.Pod, name string) string {
 func (h *Handler) onUpdatingJob(job *batchv1.Job) error {
 	owner := metav1.GetControllerOf(job)
 	if owner.APIVersion != v1alpha1.SchemeGroupVersion.String() || owner.Kind != v1alpha1.Kind {
-		logger(job).Debug("not a checkpoint job")
+		logger(job).Debug("not a snapshot job")
 		return nil
 	}
-	// query checkpoint
-	cp := &v1alpha1.Checkpoint{
+	// query snapshot
+	cp := &v1alpha1.Snapshot{
 		TypeMeta:   metav1.TypeMeta{Kind: v1alpha1.Kind, APIVersion: v1alpha1.SchemeGroupVersion.String()},
 		ObjectMeta: metav1.ObjectMeta{Name: owner.Name, Namespace: job.Namespace, UID: owner.UID},
 	}
 	if err := sdk.Get(cp); err != nil {
-		return gerr.Wrap(err, "query checkpoint failed")
+		return gerr.Wrap(err, "query snapshot failed")
 	}
 
-	// update checkpoint conditions
+	// update snapshot conditions
 	stale := updateCondition(cp, job)
 	if stale {
-		logger(cp).WithField("job", job.Name).Info("updating checkpoint conditions")
+		logger(cp).WithField("job", job.Name).Info("updating snapshot conditions")
 		if err := sdk.Update(cp); err != nil {
-			return gerr.Wrap(err, "update checkpoint with condition change failed")
+			return gerr.Wrap(err, "update snapshot with condition change failed")
 		}
 	}
 	return nil

@@ -7,7 +7,7 @@ import (
 	"os"
 	"runtime"
 
-	"qiniu-ava/checkpoint-operator/pkg/worker"
+	"qiniu-ava/snapshot-operator/pkg/worker"
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -27,7 +27,7 @@ func main() {
 	printVersion()
 	conf, e := loadConfig()
 	if e != nil {
-		logrus.WithField("error", e).Fatal("load checkpoint options failed: ", e)
+		logrus.WithField("error", e).Fatal("load snapshot options failed: ", e)
 	}
 	if conf.Verbose {
 		logrus.SetLevel(logrus.DebugLevel)
@@ -42,24 +42,24 @@ func main() {
 
 	ctx := context.Background()
 
-	if e := c.Checkpoint(ctx, conf.Options); e != nil {
-		logrus.WithField("error", e).Fatal("commit and push checkpoint failed")
+	if e := c.Snapshot(ctx, conf.Options); e != nil {
+		logrus.WithField("error", e).Fatal("commit and push snapshot failed")
 	}
-	logrus.Info("commit and push checkpoint succeed")
+	logrus.Info("commit and push snapshot succeed")
 }
 
 type config struct {
 	Version    string
 	Verbose    bool
 	DockerAuth worker.DockerAuth
-	Options    *worker.CheckpointOptions
+	Options    *worker.SnapshotOptions
 }
 
 func loadConfig() (*config, error) {
-	o := &worker.CheckpointOptions{}
-	flag.StringVar(&(o.Container), "container", "", "container name going to have a checkpoint")
-	flag.StringVar(&(o.Image), "image", "", "full image name of the checkpoint")
-	flag.StringVar(&(o.Author), "author", "", "checkpoint author")
+	o := &worker.SnapshotOptions{}
+	flag.StringVar(&(o.Container), "container", "", "container name going to have a snapshot")
+	flag.StringVar(&(o.Image), "image", "", "full image name of the snapshot")
+	flag.StringVar(&(o.Author), "author", "", "snapshot author")
 	flag.StringVar(&(o.Comment), "comment", "", "image comment")
 
 	conf := &config{}

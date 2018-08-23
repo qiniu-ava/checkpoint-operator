@@ -6,7 +6,7 @@ import (
 	"github.com/docker/docker/api/types"
 )
 
-type CheckpointOptions struct {
+type SnapshotOptions struct {
 	// docker registry auth header, from imagePushSecret
 	// see: https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#inspecting-the-secret-regcred
 	Container string `json:"container,omitempty"`
@@ -15,7 +15,7 @@ type CheckpointOptions struct {
 	Comment   string `json:"comment,omitempty"`
 }
 
-func (o *CheckpointOptions) Validate() error {
+func (o *SnapshotOptions) Validate() error {
 	if o.Container == "" {
 		return errors.New("empty container")
 	}
