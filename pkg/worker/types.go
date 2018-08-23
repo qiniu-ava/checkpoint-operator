@@ -25,4 +25,4 @@ func (o *CheckpointOptions) Validate() error {
 	return nil
 }
 
-type DockerConfig map[string]types.AuthConfig
+type DockerAuth map[string]types.AuthConfig

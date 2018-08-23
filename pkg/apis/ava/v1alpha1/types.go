@@ -1,7 +1,6 @@
 package v1alpha1
 
 import (
-	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -52,10 +51,35 @@ type CheckpointStatus struct {
 	// NodeName is the name of the node the pod/container running on, the checkpoint job must run on this node
 	NodeName string `json:"nodeName"`
 
-	// The latest available observations of the underlying job
-	// More info: https://kubernetes.io/docs/concepts/workloads/controllers/jobs-run-to-completion/
+	// The latest available observations of the checkpoint
 	// +optional
 	// +patchMergeKey=type
 	// +patchStrategy=merge
-	Conditions []batchv1.JobCondition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+	Conditions []CheckpointCondition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 }
+
+type CheckpointCondition struct {
+	// Type of job condition, Complete or Failed.
+	Type CheckpointConditionType `json:"type" protobuf:"bytes,1,opt,name=type,casttype=JobConditionType"`
+	// Status of the condition, one of True, False, Unknown.
+	Status v1.ConditionStatus `json:"status" protobuf:"bytes,2,opt,name=status,casttype=k8s.io/api/core/v1.ConditionStatus"`
+	// Last time the condition was checked.
+	// +optional
+	LastProbeTime metav1.Time `json:"lastProbeTime,omitempty" protobuf:"bytes,3,opt,name=lastProbeTime"`
+	// Last time the condition transit from one status to another.
+	// +optional
+	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty" protobuf:"bytes,4,opt,name=lastTransitionTime"`
+	// (brief) reason for the condition's last transition.
+	// +optional
+	Reason string `json:"reason,omitempty" protobuf:"bytes,5,opt,name=reason"`
+	// Human readable message indicating details about last transition.
+	// +optional
+	Message string `json:"message,omitempty" protobuf:"bytes,6,opt,name=message"`
+}
+
+type CheckpointConditionType string
+
+const (
+	CheckpointComplete CheckpointConditionType = "Complete"
+	CheckpointFailed   CheckpointConditionType = "Failed"
+)
