@@ -54,19 +54,14 @@ func (h *Handler) Handle(ctx context.Context, event sdk.Event) error {
 	case *v1alpha1.Checkpoint:
 		cp := event.Object.(*v1alpha1.Checkpoint)
 		if event.Deleted {
-			logger(cp).Info("deleting checkpoint")
-			if err := h.onDeletion(cp); err != nil {
-				logger(cp).WithField("error", err).Error("failed to delete checkpoint job")
-				return err
-			}
-			logger(cp).Info("checkpoint deleted")
+			logger(cp).Debug("deleting checkpoint")
 		} else {
-			logger(cp).Info("creating or updating checkpoint")
-			if err := h.onCreation(cp); err != nil {
-				logger(cp).WithField("error", err).Error("failed to create or update checkpoint job")
+			logger(cp).Info("updating checkpoint")
+			if err := h.onCheckpointUpdating(cp); err != nil {
+				logger(cp).WithField("error", err).Error("failed to update checkpoint job")
 				return err
 			}
-			logger(cp).Info("checkpoint created or updated")
+			logger(cp).Info("checkpoint updated")
 		}
 	case *batchv1.Job:
 		job := event.Object.(*batchv1.Job)
@@ -74,7 +69,7 @@ func (h *Handler) Handle(ctx context.Context, event sdk.Event) error {
 			logger(job).Debug("got job deletion event")
 		} else {
 			logger(job).Debug("got job updating event")
-			if err := h.onJobUpdating(job); err != nil {
+			if err := h.onUpdatingJob(job); err != nil {
 				logger(job).WithField("error", err).Error("failed to update checkpoint on job updated")
 				return err
 			}
@@ -85,14 +80,14 @@ func (h *Handler) Handle(ctx context.Context, event sdk.Event) error {
 	return nil
 }
 
-func (h *Handler) onCreation(cp *v1alpha1.Checkpoint) (e error) {
+func (h *Handler) onCheckpointUpdating(cp *v1alpha1.Checkpoint) (e error) {
 	// check if checkpoint created earlier
 	var stale bool
 	defer func() {
 		if stale {
 			logger(cp).Info("updating stale checkpoint")
 			if err := sdk.Update(cp); err != nil {
-				e = gerr.Wrap(err, "update checkpoint on creation failed")
+				e = gerr.Wrap(err, "update checkpoint failed")
 			}
 		}
 	}()
@@ -233,19 +228,6 @@ func (h *Handler) onCreation(cp *v1alpha1.Checkpoint) (e error) {
 	return sdk.Create(job)
 }
 
-func (h *Handler) onDeletion(cp *v1alpha1.Checkpoint) error {
-	job, err := queryCheckpointJob(cp)
-	if err != nil {
-		return gerr.Wrap(err, "query checkpoint job failed")
-	}
-	if job == nil {
-		logger(cp).Warning("job deleted before checkpoint")
-		return nil
-	}
-
-	return sdk.Delete(job)
-}
-
 func queryCheckpointJob(cp *v1alpha1.Checkpoint) (*batchv1.Job, error) {
 	// check jobRef
 	if cp.Status.JobRef.Name != "" {
@@ -348,7 +330,7 @@ func getContainerID(pod *v1.Pod, name string) string {
 	return ""
 }
 
-func (h *Handler) onJobUpdating(job *batchv1.Job) error {
+func (h *Handler) onUpdatingJob(job *batchv1.Job) error {
 	owner := metav1.GetControllerOf(job)
 	if owner.APIVersion != v1alpha1.SchemeGroupVersion.String() || owner.Kind != v1alpha1.Kind {
 		logger(job).Debug("not a checkpoint job")
