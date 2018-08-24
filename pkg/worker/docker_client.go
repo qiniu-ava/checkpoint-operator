@@ -30,10 +30,10 @@ func NewDockerClient(auth DockerAuth, version string) (*DockerClient, error) {
 	return &DockerClient{c: c, auth: auth}, nil
 }
 
-func (dc *DockerClient) Checkpoint(ctx context.Context, opt *CheckpointOptions) error {
+func (dc *DockerClient) Snapshot(ctx context.Context, opt *SnapshotOptions) error {
 	l := logrus.WithFields(logrus.Fields{"container": opt.Container, "image": opt.Image})
-	l.Info("creating checkpoint")
-	l.WithField("options", *opt).Debug("checkpoint options")
+	l.Info("creating snapshot")
+	l.WithField("options", *opt).Debug("snapshot options")
 	l.WithField("auth", dc.auth).Debug("docker auth")
 
 	ref, e := reference.ParseNormalizedNamed(opt.Image)
@@ -54,7 +54,7 @@ func (dc *DockerClient) Checkpoint(ctx context.Context, opt *CheckpointOptions) 
 		return errors.Wrap(e, "commit container failed")
 	}
 	l = l.WithField("id", idRes.ID)
-	l.Info("checkpoint committed")
+	l.Info("snapshot committed")
 
 	auth, e := dc.getAuth(ref)
 	if e != nil {
@@ -79,7 +79,7 @@ func (dc *DockerClient) Checkpoint(ctx context.Context, opt *CheckpointOptions) 
 	if e := jsonmessage.DisplayJSONMessagesStream(resp, l.Writer(), 0, false, nil); e != nil {
 		return errors.Wrap(e, "push image failed")
 	}
-	l.Info("checkpoint pushed")
+	l.Info("snapshot pushed")
 	return nil
 }
 

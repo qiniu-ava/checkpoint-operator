@@ -7,28 +7,28 @@ import (
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-type CheckpointList struct {
+type SnapshotList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`
-	Items           []Checkpoint `json:"items"`
+	Items           []Snapshot `json:"items"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-type Checkpoint struct {
+type Snapshot struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`
-	Spec              CheckpointSpec   `json:"spec"`
-	Status            CheckpointStatus `json:"status,omitempty"`
+	Spec              SnapshotSpec   `json:"spec"`
+	Status            SnapshotStatus `json:"status,omitempty"`
 }
 
-type CheckpointSpec struct {
-	// PodName+ContainerName is the name of the running container going be have a checkpoint
+type SnapshotSpec struct {
+	// PodName+ContainerName is the name of the running container going be have a snapshot
 	PodName       string `json:"podName"`
 	ContainerName string `json:"containerName"`
 
-	// ImageName is the checkpoint image name in the form of 'my-checkpoint:v0.0.1'
-	// The full name for the pushed image will be my-docker-registry-server/my-checkpoint:v0.0.1
+	// ImageName is the snapshot image name in the form of 'my-snapshot:v0.0.1'
+	// The full name for the pushed image will be my-docker-registry-server/my-snapshot:v0.0.1
 	// 'my-docker-registry-server' will be retrieved from ImagePushSecret
 	ImageName string `json:"imageName"`
 
@@ -44,23 +44,23 @@ type CheckpointSpec struct {
 	ImagePushSecret v1.LocalObjectReference `json:"imagePushSecret"`
 }
 
-type CheckpointStatus struct {
-	// JobRef is a reference to the internal checkpoint job which does the real commit/push works
+type SnapshotStatus struct {
+	// JobRef is a reference to the internal snapshot job which does the real commit/push works
 	JobRef v1.LocalObjectReference `json:"jobRef"`
 
-	// NodeName is the name of the node the pod/container running on, the checkpoint job must run on this node
+	// NodeName is the name of the node the pod/container running on, the snapshot job must run on this node
 	NodeName string `json:"nodeName"`
 
-	// The latest available observations of the checkpoint
+	// The latest available observations of the snapshot
 	// +optional
 	// +patchMergeKey=type
 	// +patchStrategy=merge
-	Conditions []CheckpointCondition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+	Conditions []SnapshotCondition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 }
 
-type CheckpointCondition struct {
+type SnapshotCondition struct {
 	// Type of job condition, Complete or Failed.
-	Type CheckpointConditionType `json:"type" protobuf:"bytes,1,opt,name=type,casttype=JobConditionType"`
+	Type SnapshotConditionType `json:"type" protobuf:"bytes,1,opt,name=type,casttype=JobConditionType"`
 	// Status of the condition, one of True, False, Unknown.
 	Status v1.ConditionStatus `json:"status" protobuf:"bytes,2,opt,name=status,casttype=k8s.io/api/core/v1.ConditionStatus"`
 	// Last time the condition was checked.
@@ -77,9 +77,9 @@ type CheckpointCondition struct {
 	Message string `json:"message,omitempty" protobuf:"bytes,6,opt,name=message"`
 }
 
-type CheckpointConditionType string
+type SnapshotConditionType string
 
 const (
-	CheckpointComplete CheckpointConditionType = "Complete"
-	CheckpointFailed   CheckpointConditionType = "Failed"
+	SnapshotComplete SnapshotConditionType = "Complete"
+	SnapshotFailed   SnapshotConditionType = "Failed"
 )

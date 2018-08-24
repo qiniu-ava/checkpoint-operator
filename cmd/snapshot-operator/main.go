@@ -5,7 +5,7 @@ import (
 	"flag"
 	"runtime"
 
-	stub "qiniu-ava/checkpoint-operator/pkg/stub"
+	stub "qiniu-ava/snapshot-operator/pkg/stub"
 
 	sdk "github.com/operator-framework/operator-sdk/pkg/sdk"
 	k8sutil "github.com/operator-framework/operator-sdk/pkg/util/k8sutil"
@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	workerImage = "reg.qiniu.com/ava-os/checkpoint-worker:latest"
+	workerImage = "reg.qiniu.com/ava-os/snapshot-worker:latest"
 )
 
 func printVersion() {
@@ -40,14 +40,14 @@ func main() {
 	}
 	resyncPeriod := 5
 	{
-		// watch on checkpoints to create worker jobs
+		// watch on snapshots to create worker jobs
 		resource := "ava.qiniu.com/v1alpha1"
-		kind := "Checkpoint"
+		kind := "Snapshot"
 		logrus.Infof("Watching %s, %s, %s, %d", resource, kind, namespace, resyncPeriod)
 		sdk.Watch(resource, kind, namespace, resyncPeriod)
 	}
 	{
-		// watch on jobs to update checkpoint status
+		// watch on jobs to update snapshot status
 		resource := "batch/v1"
 		kind := "Job"
 		logrus.Infof("Watching %s, %s, %s, %d", resource, kind, namespace, resyncPeriod)
@@ -67,7 +67,7 @@ func loadConfig() *config {
 	flag.BoolVar(&verbose, "verbose", false, "print debug log")
 
 	cfg := &stub.Config{}
-	flag.StringVar(&(cfg.CheckpointWorkerImage), "worker-image", workerImage, "checkpoint worker image, default to "+workerImage)
+	flag.StringVar(&(cfg.SnapshotWorkerImage), "worker-image", workerImage, "snapshot worker image, default to "+workerImage)
 	flag.StringVar(&(cfg.ImagePullSecret), "pull-secret", "", "registry secret used to pull worker image")
 	flag.Parse()
 

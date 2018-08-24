@@ -1,10 +1,10 @@
 apiVersion: "ava.qiniu.com/v1alpha1"
-kind: "Checkpoint"
+kind: "Snapshot"
 metadata:
   name: "example"
 spec:
   podName: "my-pod"
   containerName: "my-container"
-  imageName: "my-checkpoint:v0.0.1"
+  imageName: "my-snapshot:v0.0.1"
   imagePushSecret:
     name: "my-docker-registry-secret"
