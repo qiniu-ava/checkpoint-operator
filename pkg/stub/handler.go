@@ -3,7 +3,6 @@ package stub
 import (
 	"context"
 	stderr "errors"
-	"path/filepath"
 	"strings"
 
 	"qiniu-ava/snapshot-operator/pkg/apis/ava/v1alpha1"
@@ -23,7 +22,6 @@ const (
 	labelPrefix      = "snapshot-operator.ava.qiniu.com"
 	dockerSocketPath = "/var/run/docker.sock"
 	dockerConfigDir  = "/config"
-	dockerConfigName = ".dockerconfigjson"
 	containerPrefix  = "docker://"
 )
 
@@ -193,8 +191,7 @@ func (h *Handler) onSnapshotUpdating(ss *v1alpha1.Snapshot) (e error) {
 							MountPath: dockerSocketPath,
 						}, {
 							Name:      "registry-secret",
-							MountPath: filepath.Join(dockerConfigDir, dockerConfigName),
-							SubPath:   dockerConfigName,
+							MountPath: dockerConfigDir,
 						}},
 					}},
 
