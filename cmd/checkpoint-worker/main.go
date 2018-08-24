@@ -15,7 +15,7 @@ import (
 
 const (
 	defaultDockerVersion = "1.38"
-	defaultDockerConfig  = "/config/.dockercfg"
+	defaultDockerConfig  = "/config/.dockerconfigjson"
 )
 
 func printVersion() {
@@ -35,13 +35,12 @@ func main() {
 		logrus.SetLevel(logrus.InfoLevel)
 	}
 
-	c, e := worker.NewDockerClient(conf.DockerConfig, conf.Version)
+	c, e := worker.NewDockerClient(conf.DockerAuth, conf.Version)
 	if e != nil {
 		logrus.WithField("error", e).Fatal("create docker client failed")
 	}
 
 	ctx := context.Background()
-	go waitForInterruption(ctx)
 
 	if e := c.Checkpoint(ctx, conf.Options); e != nil {
 		logrus.WithField("error", e).Fatal("commit and push checkpoint failed")
@@ -50,10 +49,10 @@ func main() {
 }
 
 type config struct {
-	Version      string
-	Verbose      bool
-	DockerConfig worker.DockerConfig
-	Options      *worker.CheckpointOptions
+	Version    string
+	Verbose    bool
+	DockerAuth worker.DockerAuth
+	Options    *worker.CheckpointOptions
 }
 
 func loadConfig() (*config, error) {
@@ -75,28 +74,26 @@ func loadConfig() (*config, error) {
 	if e := o.Validate(); e != nil {
 		return nil, e
 	}
-	df, e := loadDockerConfig(configPath)
+	auth, e := loadDockerConfig(configPath)
 	if e != nil {
 		return nil, e
 	}
-	conf.DockerConfig = df
+	conf.DockerAuth = auth
 	conf.Options = o
 
 	return conf, nil
 }
 
-func loadDockerConfig(path string) (worker.DockerConfig, error) {
+func loadDockerConfig(path string) (worker.DockerAuth, error) {
 	f, e := os.Open(path)
 	if e != nil {
 		return nil, errors.Wrap(e, "open docker config file failed")
 	}
-	conf := make(worker.DockerConfig)
+	conf := struct {
+		Auths worker.DockerAuth `json:"auths"`
+	}{}
 	if e := json.NewDecoder(f).Decode(&conf); e != nil {
 		return nil, errors.Wrap(e, "unmarshal docker config failed")
 	}
-	return conf, nil
-}
-
-func waitForInterruption(ctx context.Context) {
-
+	return conf.Auths, nil
 }

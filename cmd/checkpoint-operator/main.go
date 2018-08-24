@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"runtime"
 
 	stub "qiniu-ava/checkpoint-operator/pkg/stub"
@@ -13,6 +14,10 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const (
+	workerImage = "reg.qiniu.com/ava-os/checkpoint-worker:latest"
+)
+
 func printVersion() {
 	logrus.Infof("Go Version: %s", runtime.Version())
 	logrus.Infof("Go OS/Arch: %s/%s", runtime.GOOS, runtime.GOARCH)
@@ -21,6 +26,12 @@ func printVersion() {
 
 func main() {
 	printVersion()
+	cfg := loadConfig()
+	if cfg.verbose {
+		logrus.SetLevel(logrus.DebugLevel)
+	} else {
+		logrus.SetLevel(logrus.InfoLevel)
+	}
 
 	sdk.ExposeMetricsPort()
 	namespace, err := k8sutil.GetWatchNamespace()
@@ -42,6 +53,24 @@ func main() {
 		logrus.Infof("Watching %s, %s, %s, %d", resource, kind, namespace, resyncPeriod)
 		sdk.Watch(resource, kind, namespace, resyncPeriod)
 	}
-	sdk.Handle(stub.NewHandler())
+	sdk.Handle(stub.NewHandler(cfg.Config))
 	sdk.Run(context.TODO())
+}
+
+type config struct {
+	verbose bool
+	*stub.Config
+}
+
+func loadConfig() *config {
+	var verbose bool
+	flag.BoolVar(&verbose, "verbose", false, "print debug log")
+
+	cfg := &stub.Config{}
+	flag.StringVar(&(cfg.CheckpointWorkerImage), "worker-image", workerImage, "checkpoint worker image, default to "+workerImage)
+	flag.StringVar(&(cfg.ImagePullSecret), "pull-secret", "", "registry secret used to pull worker image")
+	flag.Parse()
+
+	cfg.Verbose = verbose
+	return &config{verbose: verbose, Config: cfg}
 }

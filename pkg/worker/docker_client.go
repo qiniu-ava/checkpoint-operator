@@ -19,21 +19,22 @@ import (
 
 type DockerClient struct {
 	c    client.APIClient
-	conf DockerConfig
+	auth DockerAuth
 }
 
-func NewDockerClient(conf DockerConfig, version string) (*DockerClient, error) {
+func NewDockerClient(auth DockerAuth, version string) (*DockerClient, error) {
 	c, e := client.NewClientWithOpts(client.FromEnv, client.WithVersion(version))
 	if e != nil {
 		return nil, e
 	}
-	return &DockerClient{c: c, conf: conf}, nil
+	return &DockerClient{c: c, auth: auth}, nil
 }
 
 func (dc *DockerClient) Checkpoint(ctx context.Context, opt *CheckpointOptions) error {
 	l := logrus.WithFields(logrus.Fields{"container": opt.Container, "image": opt.Image})
 	l.Info("creating checkpoint")
-	l.WithField("options", opt).Debug("checkpoint options")
+	l.WithField("options", *opt).Debug("checkpoint options")
+	l.WithField("auth", dc.auth).Debug("docker auth")
 
 	ref, e := reference.ParseNormalizedNamed(opt.Image)
 	if e != nil {
@@ -83,13 +84,13 @@ func (dc *DockerClient) Checkpoint(ctx context.Context, opt *CheckpointOptions) 
 }
 
 func (dc *DockerClient) getAuth(ref reference.Named) (string, error) {
-	auth, exists := dc.conf[reference.Domain(ref)]
+	auth, exists := dc.auth[reference.Domain(ref)]
 	if !exists {
 		return "", stderr.New("no registry authentication found")
 	}
 	buf, e := json.Marshal(auth)
 	if e != nil {
-		return "", errors.Wrap(e, "marshal auth config failed")
+		return "", errors.Wrap(e, "marshal auth failed")
 	}
 
 	return base64.URLEncoding.EncodeToString(buf), nil

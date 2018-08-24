@@ -12,14 +12,14 @@ spec:
       labels:
         name: checkpoint-operator
     spec:
-      containers:
+        containers:
         - name: checkpoint-operator
           image: reg.qiniu.com/ava-os/checkpoint-operator:latest
           ports:
           - containerPort: 60000
             name: metrics
-          command:
-          - checkpoint-operator
+          args:
+          - --worker-image=reg.qiniu.com/ava-os/checkpoint-worker:latest
           imagePullPolicy: Always
           env:
             - name: WATCH_NAMESPACE

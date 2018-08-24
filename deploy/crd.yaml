@@ -13,3 +13,25 @@ spec:
     - chp
   scope: Namespaced
   version: v1alpha1
+  validations:
+    openAPIV3Schema:
+      properties:
+        spec:
+          required:
+          - podName
+          - containerName
+          - imageName
+          - imagePushSecret
+          properties:
+            podName:
+              type: string
+            containerName:
+              type: string
+            imageName:
+              type: string
+            imagePushSecret:
+              required:
+              - name
+              properties:
+                name:
+                  type: string
