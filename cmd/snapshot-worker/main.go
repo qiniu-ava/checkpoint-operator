@@ -5,7 +5,7 @@ import (
 	"flag"
 	"runtime"
 
-	"qiniu-ava/snapshot-operator/pkg/worker"
+	"github.com/qiniu-ava/snapshot-operator/pkg/worker"
 
 	"github.com/sirupsen/logrus"
 )

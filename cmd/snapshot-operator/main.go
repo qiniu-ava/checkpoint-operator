@@ -5,7 +5,7 @@ import (
 	"flag"
 	"runtime"
 
-	stub "qiniu-ava/snapshot-operator/pkg/stub"
+	stub "github.com/qiniu-ava/snapshot-operator/pkg/stub"
 
 	sdk "github.com/operator-framework/operator-sdk/pkg/sdk"
 	k8sutil "github.com/operator-framework/operator-sdk/pkg/util/k8sutil"

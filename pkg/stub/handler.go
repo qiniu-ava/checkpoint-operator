@@ -5,7 +5,7 @@ import (
 	stderr "errors"
 	"strings"
 
-	"qiniu-ava/snapshot-operator/pkg/apis/ava/v1alpha1"
+	"github.com/qiniu-ava/snapshot-operator/pkg/apis/ava/v1alpha1"
 
 	"github.com/operator-framework/operator-sdk/pkg/sdk"
 	gerr "github.com/pkg/errors"
