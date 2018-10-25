@@ -7,6 +7,10 @@ PUSH=false
 CONTROLLER=false
 WORKER=false
 
+if [[ $# -lt 1 ]]; then
+	echo "usage: $0 <controller|worker|all> [--push]"
+fi
+
 case $1 in
 controller)
 	CONTROLLER=true
