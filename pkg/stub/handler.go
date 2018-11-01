@@ -329,7 +329,7 @@ func getContainerID(pod *v1.Pod, name string) string {
 
 func (h *Handler) onUpdatingJob(job *batchv1.Job) error {
 	owner := metav1.GetControllerOf(job)
-	if owner.APIVersion != v1alpha1.SchemeGroupVersion.String() || owner.Kind != v1alpha1.Kind {
+	if owner == nil || owner.APIVersion != v1alpha1.SchemeGroupVersion.String() || owner.Kind != v1alpha1.Kind {
 		logger(job).Debug("not a snapshot job")
 		return nil
 	}
