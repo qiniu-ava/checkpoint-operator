@@ -26,11 +26,10 @@ const (
 )
 
 var (
-	truevalue                             = true
-	one                   int32           = 1
-	readOnly              int32           = 0400
-	hostPathSocket        v1.HostPathType = v1.HostPathSocket
-	workerDeadlineSeconds int64           = 30 * 60
+	truevalue                      = true
+	one            int32           = 1
+	readOnly       int32           = 0400
+	hostPathSocket v1.HostPathType = v1.HostPathSocket
 )
 
 func NewHandler(cfg *Config) sdk.Handler {
@@ -43,6 +42,7 @@ type Handler struct {
 
 type Config struct {
 	SnapshotWorkerImage string `json:"snapshotWorkerImage,omitempty"`
+	WorkerTTL           int64  `json:"workerTTL,omitempty"`
 	ImagePullSecret     string `json:"imagePullSecret,omitempty"`
 	Verbose             bool   `json:"verbose,omitempty"`
 }
@@ -154,7 +154,7 @@ func (h *Handler) onSnapshotUpdating(ss *v1alpha1.Snapshot) (e error) {
 		Spec: batchv1.JobSpec{
 			Parallelism:           &one,
 			Completions:           &one,
-			ActiveDeadlineSeconds: &workerDeadlineSeconds,
+			ActiveDeadlineSeconds: &h.cfg.WorkerTTL,
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: ss.Labels,
@@ -164,7 +164,7 @@ func (h *Handler) onSnapshotUpdating(ss *v1alpha1.Snapshot) (e error) {
 				},
 				Spec: v1.PodSpec{
 					RestartPolicy:         v1.RestartPolicyOnFailure,
-					ActiveDeadlineSeconds: &workerDeadlineSeconds,
+					ActiveDeadlineSeconds: &h.cfg.WorkerTTL,
 					NodeName:              ss.Status.NodeName,
 					ImagePullSecrets: func() []v1.LocalObjectReference {
 						if h.cfg.ImagePullSecret != "" {
