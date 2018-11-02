@@ -38,7 +38,7 @@ func main() {
 	if err != nil {
 		logrus.Fatalf("Failed to get watch namespace: %v", err)
 	}
-	resyncPeriod := 5
+	resyncPeriod := 36000
 	{
 		// watch on snapshots to create worker jobs
 		resource := "ava.qiniu.com/v1alpha1"
