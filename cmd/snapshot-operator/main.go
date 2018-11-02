@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"runtime"
+	"time"
 
 	stub "github.com/qiniu-ava/snapshot-operator/pkg/stub"
 
@@ -15,7 +16,8 @@ import (
 )
 
 const (
-	workerImage = "reg.qiniu.com/ava-os/snapshot-worker:latest"
+	workerImage       = "reg.qiniu.com/ava-os/snapshot-worker:latest"
+	workerTTL   int64 = 24 * 3600
 )
 
 func printVersion() {
@@ -68,6 +70,7 @@ func loadConfig() *config {
 
 	cfg := &stub.Config{}
 	flag.StringVar(&(cfg.SnapshotWorkerImage), "worker-image", workerImage, "snapshot worker image, default to "+workerImage)
+	flag.Int64Var(&(cfg.WorkerTTL), "worker-ttl", workerTTL, "snapshot worker ttl, default to "+(time.Duration(workerTTL)*time.Second).String())
 	flag.StringVar(&(cfg.ImagePullSecret), "pull-secret", "", "registry secret used to pull worker image")
 	flag.Parse()
 
