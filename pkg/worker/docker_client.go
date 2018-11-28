@@ -76,14 +76,13 @@ func (dc *DockerClient) Snapshot(ctx context.Context, opt *SnapshotOptions) erro
 		},
 	})
 	defer func() {
-		io.CopyN(ioutil.Discard, resp, 512)
+		io.Copy(ioutil.Discard, resp)
 		resp.Close()
 	}()
 	if e != nil {
 		return errors.Wrap(e, "push image failed")
 	}
 
-	defer resp.Close()
 	if e := jsonmessage.DisplayJSONMessagesStream(resp, l.Writer(), 0, false, nil); e != nil {
 		return errors.Wrap(e, "push image failed")
 	}
